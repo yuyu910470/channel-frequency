@@ -44,6 +44,8 @@ tr:hover td{background:#f7fafc}
 .update-status.error{background:#fff0f0;color:#8a3030}
 
 .badge.paid,.badge.bothPaid{background:#fff0f0;color:#b42318;}
+
+.system-cell{vertical-align:middle;white-space:nowrap;}
 </style>
 </head>
 <body>
@@ -64,7 +66,8 @@ tr:hover td{background:#f7fafc}
 </div>
 <div class="card">
 <div class="search-row">
-<input id="search" class="search-input" placeholder="輸入關鍵字，例如：CNN、BBC Earth、Discovery..." autocomplete="off">
+<input id="search" class="search-input" placeholder="搜尋頻道名稱，例如：CNN、BBC Earth、Discovery..." autocomplete="off">
+<input id="frequencySearch" class="search-input" placeholder="搜尋頻位，例如：14、CH14、CH.14" autocomplete="off">
 <button onclick="searchData()">查詢</button>
 <button class="secondary" onclick="clearSearch()">清除</button>
 </div>
@@ -80,10 +83,10 @@ tr:hover td{background:#f7fafc}
 <div class="stat"><b id="unlistedCount">0</b> 家未上架</div>
 </div>
 <div class="rule">
-<strong>搜尋規則：</strong>只搜尋資料庫「最新頻道名稱」。搜尋不分大小寫，輸入部分關鍵字即可，例如輸入 <b>CNN</b> 可找到 CNN、CNN International 等名稱；英文單字有少量拼字錯誤時也會嘗試比對，例如 <b>BBC lifestye</b> 可找到 BBC Lifestyle。
+<strong>搜尋規則：</strong>左側搜尋欄可依「最新頻道名稱」查詢；右側可直接輸入「頻位」查詢各家系統台在該頻位的頻道，例如輸入 <b>14</b>、<b>CH14</b> 或 <b>CH.14</b> 都會視為同一頻位。兩個欄位都輸入時，會同時套用「頻道名稱＋頻位」條件。頻道名稱搜尋不分大小寫，輸入部分關鍵字即可，例如輸入 <b>CNN</b> 可找到 CNN、CNN International 等名稱；英文單字有少量拼字錯誤時也會嘗試比對，例如 <b>BBC lifestye</b> 可找到 BBC Lifestyle。
 </div>
 <div class="note">
-每一家系統台只顯示一筆最符合關鍵字的結果；如果該系統台的「最新頻道名稱」完全找不到關鍵字，就直接顯示「未上架」，不會拿其他系統台的名稱補上。系統台名稱若與資料庫寫法不同，會先依系統台對應規則進行比對。
+一般頻道名稱關鍵字每一家系統台只顯示一筆最符合關鍵字的結果；如果只輸入頻道名稱開頭的兩個中文字，則會顯示該系統台所有以這兩字開頭的頻道（例如「博斯」會同時顯示博斯運動一台、博斯運動二台）。搜尋頻位時，則會列出各家系統台該頻位的頻道；同一系統台若有多個不同頻道共用該頻位，會全部列出。兩個搜尋欄位同時輸入時，會先篩選符合兩項條件的資料。同一系統台名稱在畫面上只顯示一次；原始資料若造成完全相同的頻位、頻道與屬性重複，也會自動合併。如果該系統台找不到符合條件的資料，就直接顯示「未上架」，不會拿其他系統台的名稱補上。系統台名稱若與資料庫寫法不同，會先依系統台對應規則進行比對。
 </div>
 </div>
 <div class="table-wrap">
@@ -209,7 +212,11 @@ const CHANNEL_SEARCH_ALIASES = [
     { aliases:["hbo signature"], targets:["hbo 原創鉅獻"] },
     { aliases:["hbo 原創鉅獻"], targets:["hbo signature"] },
     { aliases:["hbo family"], targets:["hbo 溫馨家庭"] },
-    { aliases:["hbo 溫馨家庭"], targets:["hbo family"] }
+    { aliases:["hbo 溫馨家庭"], targets:["hbo family"] },
+    // 公視台語台：部分系統台的 NCC 原始名稱為「台視台語台(公視2台)」
+    // 因此搜尋任一名稱，都可以找到另一種寫法。
+    { aliases:["公視台語台"], targets:["台視台語台(公視2台)", "台視台語台（公視2台）"] },
+    { aliases:["台視台語台(公視2台)", "台視台語台（公視2台）"], targets:["公視台語台"] }
 ];
 
 function getSearchAliasQueries(q){
@@ -326,58 +333,108 @@ function compareZhongjia(best, q, system){
     return refs.some(ref=>normalizeFrequency(ref)===targetFreq) ? "一致" : "不一致";
 }
 
+function isTwoChinesePrefixQuery(q){
+    const n=normalizeSearchText(q);
+    // 只有輸入兩個中文字，且視為「頻道名稱前兩字」查詢。
+    // 例如「博斯」會列出博斯運動一台、博斯運動二台等所有同前綴頻道。
+    return Array.from(n).length===2 && /^[\u3400-\u9fff]{2}$/.test(n);
+}
+
+function channelMatchesTwoChinesePrefix(channelName,q){
+    const nq=normalizeSearchText(q);
+    const nn=normalizeSearchText(channelName);
+    return nn.startsWith(nq);
+}
+
 function searchData(){
     const q=document.getElementById("search").value.trim();
+    const fq=document.getElementById("frequencySearch").value.trim();
     const nq=normalizeSearchText(q);
+    const nfq=normalizeFrequency(fq);
     const city=document.getElementById("cityFilter").value;
     const sysFilter=document.getElementById("systemFilter").value;
     const groupFilter=document.getElementById("groupFilter").value;
     const attr=document.getElementById("attrFilter").value;
 
-    if(!nq){
+    if(!nq && !nfq){
         clearResults();
         return;
     }
 
+    const hasChannelQuery=!!nq;
+    const hasFrequencyQuery=!!nfq;
+    const twoPrefix=hasChannelQuery && isTwoChinesePrefixQuery(q);
     let rows=[];
 
     // 逐一檢查每一個系統台：
-    // 找得到關鍵字 -> 顯示該系統台最符合的一筆
+    // 1. 頻道名稱查詢：一般關鍵字取最佳結果；兩個中文字前綴則列出全部同前綴頻道。
+    // 2. 頻位查詢：直接找該系統台的指定頻位，列出該頻位的頻道。
+    // 3. 兩欄同時輸入：兩個條件必須同時符合。
     // 完全找不到 -> 顯示未上架
     SYSTEMS.forEach(system=>{
         const dataSystemNames=getSystemDataNames(system);
-        // 系統台比對改為「標準化後的名稱比對」，不要再用原始字串 includes。
-        // 這可確實處理：
-        // 北都數位(台北市全區) ↔ 北都數位
-        // 數位天空服務(板橋/土城) ↔ 數位天空服務
-        // 大豐(板橋/土城/中和/永和/樹林/三峽/鶯歌) ↔ 大豐
         const dataSystemKeys=new Set(dataSystemNames.map(normalizeSystemName));
-        const matches=DATA.filter(x=>
-            dataSystemKeys.has(normalizeSystemName(x["系統台"])) &&
-            channelMatchesQuery(x["頻道名稱"],q)
-        );
+        let matches=DATA.filter(x=>dataSystemKeys.has(normalizeSystemName(x["系統台"])));
 
+        if(hasFrequencyQuery){
+            matches=matches.filter(x=>normalizeFrequency(x["頻位"])===nfq);
+        }
+
+        if(hasChannelQuery){
+            matches=matches.filter(x=>twoPrefix
+                ? channelMatchesTwoChinesePrefix(x["頻道名稱"],q)
+                : channelMatchesQuery(x["頻道名稱"],q));
+        }
+
+        const m=META.find(x=>String(x["系統名稱"])===String(system)) || {};
         if(matches.length>0){
-            const best=chooseBest(matches,q);
-            const m=META.find(x=>String(x["系統名稱"])===String(system)) || {};
-            // 命中資料庫別名時，畫面仍以使用者看到的系統台名稱、縣市與集團呈現。
-            rows.push({
-                ...best,
-                "縣市":best["縣市"]||m["縣市別"]||"",
-                "系統台":system,
-                "業者/集團":best["業者/集團"]||m["業者/集團"]||""
+            let selected;
+            if(hasFrequencyQuery){
+                // 頻位查詢時，保留該系統台該頻位的所有不同頻道。
+                selected=matches.slice().sort((a,b)=>{
+                    const an=normalizeSearchText(a["頻道名稱"]);
+                    const bn=normalizeSearchText(b["頻道名稱"]);
+                    if(an!==bn) return an.localeCompare(bn,"zh-Hant");
+                    return String(a["頻道名稱"]).localeCompare(String(b["頻道名稱"]),"zh-Hant");
+                });
+            }else if(twoPrefix){
+                selected=matches.slice().sort((a,b)=>{
+                    const af=normalizeFrequency(a["頻位"]);
+                    const bf=normalizeFrequency(b["頻位"]);
+                    const an=normalizeSearchText(a["頻道名稱"]);
+                    const bn=normalizeSearchText(b["頻道名稱"]);
+                    if(af && bf && af!==bf) return af.localeCompare(bf, undefined, {numeric:true});
+                    if(an!==bn) return an.localeCompare(bn,"zh-Hant");
+                    return String(a["頻道名稱"]).localeCompare(String(b["頻道名稱"]),"zh-Hant");
+                });
+            }else{
+                selected=[chooseBest(matches,q)];
+            }
+
+            selected.forEach(best=>{
+                const row={
+                    ...best,
+                    "縣市":best["縣市"]||m["縣市別"]||"",
+                    "系統台":system,
+                    "業者/集團":best["業者/集團"]||m["業者/集團"]||""
+                };
+                // 頻位單獨搜尋時，無法判定「同一頻道」的中嘉對應頻位，避免產生誤導性比較。
+                // 若有頻道名稱條件，則維持原本的中嘉頻位比對。
+                row["與中嘉頻位"] = hasChannelQuery ? compareZhongjia(best,q,system) : "—";
+                rows.push(row);
             });
-            rows[rows.length-1]["與中嘉頻位"] = compareZhongjia(best,q,system);
         }else{
-            const m=META.find(x=>String(x["系統名稱"])===String(system)) || {};
+            // 單獨搜尋頻位時：每一家系統台都要呈現指定頻位。
+            // 若該系統台在資料庫中沒有這個頻位，代表該頻位目前沒有頻道，顯示「空頻」。
+            // 若是同時搭配頻道名稱搜尋，才維持「未上架」的邏輯。
             rows.push({
                 "縣市":m["縣市別"]||"",
                 "系統台":system,
                 "業者/集團":m["業者/集團"]||"",
-                "頻位":"-",
-                "頻道名稱":q,
-                "頻道屬性":"未上架",
-                "與中嘉頻位":"未上架"
+                "頻位":hasFrequencyQuery ? fq : "-",
+                "頻道名稱":hasFrequencyQuery && !hasChannelQuery ? "空頻" : (hasChannelQuery ? q : `頻位 ${fq}`),
+                "頻道屬性":hasFrequencyQuery && !hasChannelQuery ? "未標示" : "未上架",
+                "與中嘉頻位":hasFrequencyQuery && !hasChannelQuery ? "—" : "未上架"
             });
         }
     });
@@ -389,10 +446,28 @@ function searchData(){
         (!attr||x["頻道屬性"]===attr)
     );
 
+    // 同一系統台的資料可能因原始總表有多個組別而產生完全相同的結果。
+    // 畫面只保留一筆完全相同的結果，避免同一頻位／頻道重複出現。
+    const seen=new Set();
+    rows=rows.filter(x=>{
+        const key=[
+            x["縣市"],x["系統台"],x["業者/集團"],x["頻位"],
+            x["頻道名稱"],x["頻道屬性"],x["與中嘉頻位"]
+        ].map(v=>String(v??"").trim()).join("\u001f");
+        if(seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+
     rows.sort((a,b)=>{
         const c=String(a["縣市"]).localeCompare(String(b["縣市"]),"zh-Hant");
         if(c)return c;
-        return String(a["系統台"]).localeCompare(String(b["系統台"]),"zh-Hant");
+        const s=String(a["系統台"]).localeCompare(String(b["系統台"]),"zh-Hant");
+        if(s)return s;
+        const af=normalizeFrequency(a["頻位"]);
+        const bf=normalizeFrequency(b["頻位"]);
+        if(af && bf && af!==bf) return af.localeCompare(bf,undefined,{numeric:true});
+        return String(a["頻道名稱"]).localeCompare(String(b["頻道名稱"]),"zh-Hant");
     });
 
     document.getElementById("resultCount").textContent=rows.length.toLocaleString();
@@ -406,19 +481,33 @@ function searchData(){
         return;
     }
 
-    tbody.innerHTML=rows.map(x=>`
+    // 同一系統台在多筆結果時，系統台名稱只顯示一次，以 rowspan 合併。
+    const groupSizes=new Map();
+    rows.forEach(x=>{
+        const key=String(x["縣市"]||"")+"\u001f"+String(x["系統台"]||"");
+        groupSizes.set(key,(groupSizes.get(key)||0)+1);
+    });
+    const renderedGroups=new Set();
+
+    tbody.innerHTML=rows.map(x=>{
+        const groupKey=String(x["縣市"]||"")+"\u001f"+String(x["系統台"]||"");
+        const firstInGroup=!renderedGroups.has(groupKey);
+        renderedGroups.add(groupKey);
+        const systemCell=firstInGroup
+            ? `<td rowspan="${groupSizes.get(groupKey)}" class="system-cell"><b>${esc(x["系統台"])}</b></td>`
+            : "";
+        return `
         <tr>
             <td>${esc(x["縣市"])}</td>
-            <td><b>${esc(x["系統台"])}</b></td>
+            ${systemCell}
             <td>${esc(x["業者/集團"])}</td>
             <td><b>${esc(x["頻位"])}</b></td>
             <td>${esc(x["頻道名稱"])}</td>
             <td><span class="status ${cls(x["頻道屬性"])}">${esc(x["頻道屬性"])}</span></td>
-            <td><span class="status ${x["與中嘉頻位"]==="一致"?"basic":x["與中嘉頻位"]==="不一致"?"paid":"unlisted"}">${esc(x["與中嘉頻位"])}</span></td>
-        </tr>
-    `).join("");
+            <td><span class="status ${x["與中嘉頻位"]==="一致" ? "basic" : x["與中嘉頻位"]==="不一致" ? "paid" : "unlisted"}">${esc(x["與中嘉頻位"])}</span></td>
+        </tr>`;
+    }).join("");
 }
-
 /* ==================== 季度更新：ODS 匯入 ==================== */
 function setUpdateStatus(message, type=""){
     const el=document.getElementById("updateStatus");
@@ -680,6 +769,7 @@ function clearResults(){
 
 function clearSearch(){
     document.getElementById("search").value="";
+    document.getElementById("frequencySearch").value="";
     document.getElementById("cityFilter").value="";
     document.getElementById("systemFilter").value="";
     document.getElementById("groupFilter").value="";
@@ -688,6 +778,9 @@ function clearSearch(){
 }
 
 document.getElementById("search").addEventListener("keydown",e=>{
+    if(e.key==="Enter")searchData();
+});
+document.getElementById("frequencySearch").addEventListener("keydown",e=>{
     if(e.key==="Enter")searchData();
 });
 populateFilters();
