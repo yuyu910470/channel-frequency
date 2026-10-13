@@ -86,7 +86,7 @@ tr:hover td{background:#f7fafc}
 <strong>搜尋規則：</strong>左側搜尋欄可依「最新頻道名稱」查詢；右側可直接輸入「頻位」查詢各家系統台在該頻位的頻道，例如輸入 <b>14</b>、<b>CH14</b> 或 <b>CH.14</b> 都會視為同一頻位。兩個欄位都輸入時，會同時套用「頻道名稱＋頻位」條件。頻道名稱搜尋不分大小寫，輸入部分關鍵字即可，例如輸入 <b>CNN</b> 可找到 CNN、CNN International 等名稱；英文單字有少量拼字錯誤時也會嘗試比對，例如 <b>BBC lifestye</b> 可找到 BBC Lifestyle。
 </div>
 <div class="note">
-一般頻道名稱關鍵字每一家系統台只顯示一筆最符合關鍵字的結果；如果只輸入頻道名稱開頭的兩個中文字，則會顯示該系統台所有以這兩字開頭的頻道（例如「博斯」會同時顯示博斯運動一台、博斯運動二台）。搜尋頻位時，則會列出各家系統台該頻位的頻道；同一系統台若有多個不同頻道共用該頻位，會全部列出。兩個搜尋欄位同時輸入時，會先篩選符合兩項條件的資料。同一系統台名稱在畫面上只顯示一次；原始資料若造成完全相同的頻位、頻道與屬性重複，也會自動合併。如果該系統台找不到符合條件的資料，就直接顯示「未上架」，不會拿其他系統台的名稱補上。系統台名稱若與資料庫寫法不同，會先依系統台對應規則進行比對。
+一般頻道名稱關鍵字每一家系統台只顯示一筆最符合關鍵字的結果；如果只輸入頻道名稱開頭的兩個中文字，則會顯示該系統台所有以這兩字開頭的頻道（例如「博斯」會同時顯示博斯運動一台、博斯運動二台）。若未輸入頻道名稱或頻位、而是直接選擇特定系統台，會顯示該系統台完整頻道表。搜尋頻位時，則會列出各家系統台該頻位的頻道；同一系統台若有多個不同頻道共用該頻位，會全部列出。兩個搜尋欄位同時輸入時，會先篩選符合兩項條件的資料。同一系統台名稱在畫面上只顯示一次；原始資料若造成完全相同的頻位、頻道與屬性重複，也會自動合併。如果該系統台找不到符合條件的資料，就直接顯示「未上架」，不會拿其他系統台的名稱補上。系統台名稱若與資料庫寫法不同，會先依系統台對應規則進行比對。
 </div>
 </div>
 <div class="table-wrap">
@@ -356,7 +356,9 @@ function searchData(){
     const groupFilter=document.getElementById("groupFilter").value;
     const attr=document.getElementById("attrFilter").value;
 
-    if(!nq && !nfq){
+    // 沒有輸入頻道名稱或頻位時，只有選定特定系統台才顯示完整頻道表；
+    // 若仍是「全部系統台」，則維持初始空白，避免一次載入所有系統台的全部資料。
+    if(!nq && !nfq && !sysFilter){
         clearResults();
         return;
     }
@@ -389,7 +391,15 @@ function searchData(){
         const m=META.find(x=>String(x["系統名稱"])===String(system)) || {};
         if(matches.length>0){
             let selected;
-            if(hasFrequencyQuery){
+            if(!hasChannelQuery && !hasFrequencyQuery){
+                // 使用者只選了系統台：顯示該系統台完整頻道表，依頻位排序。
+                selected=matches.slice().sort((a,b)=>{
+                    const af=normalizeFrequency(a["頻位"]);
+                    const bf=normalizeFrequency(b["頻位"]);
+                    if(af && bf && af!==bf) return af.localeCompare(bf, undefined, {numeric:true});
+                    return String(a["頻道名稱"]).localeCompare(String(b["頻道名稱"]),"zh-Hant");
+                });
+            }else if(hasFrequencyQuery){
                 // 頻位查詢時，保留該系統台該頻位的所有不同頻道。
                 selected=matches.slice().sort((a,b)=>{
                     const an=normalizeSearchText(a["頻道名稱"]);
