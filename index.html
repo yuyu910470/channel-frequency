@@ -229,14 +229,13 @@ const CHANNEL_SEARCH_ALIASES = [
     { aliases:["hbo 原創鉅獻"], targets:["hbo signature"] },
     { aliases:["hbo family"], targets:["hbo 溫馨家庭"] },
     { aliases:["hbo 溫馨家庭"], targets:["hbo family"] },
+    // 華視：洄瀾系統台的 NCC 原始名稱為「中華電視台」
+    { aliases:["華視"], targets:["中華電視台"] },
+    { aliases:["中華電視台"], targets:["華視"] },
     // 公視台語台：部分系統台的 NCC 原始名稱為「台視台語台(公視2台)」
     // 因此搜尋任一名稱，都可以找到另一種寫法。
     { aliases:["公視台語台"], targets:["台視台語台(公視2台)", "台視台語台（公視2台）"] },
-    { aliases:["台視台語台(公視2台)", "台視台語台（公視2台）"], targets:["公視台語台"] },
-    // 華視：NCC 原始資料可能使用「中華電視台」，使用者常用「華視」搜尋。
-    // 雙向設定，讓「華視」可找到「中華電視台」，也讓搜尋完整名稱時能對應「華視」。
-    { aliases:["華視"], targets:["中華電視台"] },
-    { aliases:["中華電視台"], targets:["華視"] }
+    { aliases:["台視台語台(公視2台)", "台視台語台（公視2台）"], targets:["公視台語台"] }
 ];
 
 function getSearchAliasQueries(q){
@@ -404,7 +403,7 @@ function searchData(){
 
         if(hasChannelQuery){
             matches=matches.filter(x=>twoPrefix
-                ? channelMatchesTwoChinesePrefix(x["頻道名稱"],q)
+                ? (channelMatchesTwoChinesePrefix(x["頻道名稱"],q) || channelMatchesQuery(x["頻道名稱"],q))
                 : channelMatchesQuery(x["頻道名稱"],q));
         }
 
